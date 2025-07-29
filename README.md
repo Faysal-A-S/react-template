@@ -9,7 +9,7 @@ A modern, production-ready React TypeScript starter template with a comprehensiv
 - **📘 TypeScript** - Type safety and better developer experience
 - **🎨 Tailwind CSS v4** - Utility-first CSS framework
 - **🧭 TanStack Router** - Type-safe routing with file-based routing
-- **🔄 TanStack Query** - Powerful data synchronization for React
+- **🔄 TanStack Query** - Powerful data synchronization with queryOptions pattern and Suspense support
 - **📋 React Hook Form** - Performant forms with easy validation
 - **🎯 Valibot** - Schema validation libraries
 - **🔧 Jotai** - Primitive and flexible state management
@@ -123,6 +123,16 @@ const queryClient = new QueryClient({
 });
 ```
 
+#### Query Options Pattern Benefits
+
+This template encourages using `queryOptions` for:
+- **Type Safety** - Full TypeScript support with inferred types
+- **Reusability** - Share query configurations across components
+- **Consistency** - Standardized query definitions
+- **Testing** - Easier to mock and test individual queries
+- **Prefetching** - Simple integration with router prefetching
+- **Suspense Ready** - Works seamlessly with `useSuspenseQuery`
+
 ### ESLint Configuration
 
 ESLint is configured with:
@@ -167,19 +177,76 @@ function About() {
 
 ### Using TanStack Query
 
+#### Query Options Pattern (Recommended)
+
+Use `queryOptions` to define reusable query configurations:
+
+```tsx
+// src/api/users.api.ts
+import { queryOptions } from '@tanstack/react-query'
+
+// Define query options for better reusability and type safety
+export function getUserOptions(userId: string) {
+  return queryOptions({
+    queryKey: ['user', userId],
+    queryFn: async () => {
+      const response = await fetch(`/api/users/${userId}`)
+      if (!response.ok) throw new Error('Failed to fetch user')
+      return response.json()
+    },
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  })
+}
+
+export function getUsersOptions(filters: UserFilters = {}) {
+  return queryOptions({
+    queryKey: ['users', filters],
+    queryFn: async () => {
+      const params = new URLSearchParams(filters)
+      const response = await fetch(`/api/users?${params}`)
+      if (!response.ok) throw new Error('Failed to fetch users')
+      return response.json()
+    },
+  })
+}
+```
+
+#### Using with Regular Query
+
 ```tsx
 import { useQuery } from '@tanstack/react-query'
+import { getUserOptions } from '../api/users.api'
 
 function UserProfile({ userId }: { userId: string }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['user', userId],
-    queryFn: () => fetchUser(userId),
-  })
+  const { data, isLoading, error } = useQuery(getUserOptions(userId))
 
   if (isLoading) return <div>Loading...</div>
   if (error) return <div>Error: {error.message}</div>
   
   return <div>Welcome, {data.name}!</div>
+}
+```
+
+#### Using with Suspense Query
+
+```tsx
+import { useSuspenseQuery } from '@tanstack/react-query'
+import { getUserOptions } from '../api/users.api'
+
+function UserProfile({ userId }: { userId: string }) {
+  // No loading state needed - Suspense boundary handles it
+  const { data } = useSuspenseQuery(getUserOptions(userId))
+  
+  return <div>Welcome, {data.name}!</div>
+}
+
+// Wrap with Suspense boundary
+function App() {
+  return (
+    <Suspense fallback={<div>Loading user...</div>}>
+      <UserProfile userId="123" />
+    </Suspense>
+  )
 }
 ```
 
