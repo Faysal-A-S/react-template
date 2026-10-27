@@ -1,67 +1,71 @@
-import api from '@/lib/api';
+import { useMutation } from "@tanstack/react-query";
+import { isXiorError } from "xior";
+import { toast } from "sonner";
+import { publicApi } from "@/lib/api";
+import { mapLoginResponse } from "@/lib/auth-response";
+import {
+    getSession,
+    getSessionVersion,
+    isSessionInitialized,
+    setSession,
+} from "@/store";
+import type { LoginCredentials, Session } from "@/lib/auth-types";
 
-import { authAtom } from '@/store';
-import { useMutation } from '@tanstack/react-query';
-import { useAtom } from 'jotai/react';
-import { RESET } from 'jotai/utils';
-// import { toast } from "sonner";
-// import type { XiorError } from "xior";
+let pendingSession: Promise<Session | null> | null = null;
 
-// type LoginResponse = {
-//   message: string;
-//   user: undefined;
-//   token: string;
-// };
+// Deduplicate initial route loads. Only a 401 means signed out; network/server
+// failures reach the route error screen and can be retried.
+export function restoreSession(): Promise<Session | null> {
+    if (isSessionInitialized()) return Promise.resolve(getSession());
+    if (pendingSession) return pendingSession;
+    const version = getSessionVersion();
+    pendingSession = publicApi
+        .get<unknown>("/auth/me")
+        .then((response) => mapLoginResponse(response.data))
+        .catch((error: unknown) => {
+            if (isXiorError(error) && error.response?.status === 401)
+                return null;
+            throw error;
+        })
+        .then((session) => {
+            if (version === getSessionVersion()) setSession(session);
+            return getSession();
+        })
+        .finally(() => {
+            pendingSession = null;
+        });
+    return pendingSession;
+}
 
-// export function useLogin() {
-//   const [, setAuth] = useAtom(authAtom);
+export async function login(payload: LoginCredentials) {
+    const response = await publicApi.post<unknown>("/auth/login", payload);
+    const session = mapLoginResponse(response.data);
+    setSession(session);
+    return session;
+}
 
-//   return useMutation<
-//     LoginResponse,
-//     XiorError<APIErrorResponse>,
-//     LoginForm,
-//     { toastId: number | string }
-//   >({
-//     mutationFn: async (data: LoginForm) => {
-//       return await api.post("/login", data).then((response) => response.data);
-//     },
-//     onMutate: () => {
-//       const toastId = toast.loading(m["login.logging in"](), {
-//         description: m["login.logging in"](),
-//       });
-//       return {
-//         toastId,
-//       };
-//     },
-//     onSuccess: (data, _, context) => {
-//       toast.success(m["login.logged in"](), { id: context.toastId });
-//       setAuth({
-//         user: data.user,
-//         token: data.token,
-//       });
-//     },
-//     onError: (error, _, context) => {
-//       console.error("Login error:", error.response);
-//       toast.error(m["login.login failed"](), {
-//         id: context?.toastId,
-//         description: error.response?.data.message,
-//       });
-//     },
-//   });
-// }
+export async function logout() {
+    await publicApi.post("/auth/logout");
+    setSession(null);
+}
+
+export function useLogin() {
+    return useMutation({
+        mutationKey: ["login"],
+        mutationFn: login,
+        onSuccess() {
+            toast.success("Signed in successfully.");
+        },
+    });
+}
 
 export function useLogout() {
-	const [, setAuth] = useAtom(authAtom);
-
-	return useMutation<void, Error>({
-		mutationFn: async () => {
-			return await api.post('/logout').then(response => response.data);
-		},
-		onMutate: () => {
-			setAuth(RESET);
-		},
-		onError: error => {
-			console.error('Logout error:', error);
-		},
-	});
+    return useMutation({
+        mutationKey: ["logout"],
+        // Preserve the UI session if the server cannot clear its cookie.
+        mutationFn: logout,
+        onError() {
+            toast.error("Could not sign out. Please try again.");
+        },
+    });
 }
